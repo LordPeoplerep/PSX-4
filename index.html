@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>PSX - Peoplerep Stock Exchange</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<style>
+  body { font-family: Arial, sans-serif; background: #f0f2f5; padding: 20px; }
+  h1 { color: #222; }
+  table { width: 100%; border-collapse: collapse; background: #fff; margin-top: 20px; }
+  th, td { padding: 12px; border: 1px solid #ccc; text-align: left; }
+  th { background: #e0e0e0; }
+  .price { font-weight: bold; }
+  .change { font-size: 0.9em; }
+  canvas { display: block; margin-top: 4px; }
+  #adminPanel { display: none; background: #fff; padding: 15px; border: 1px solid #ccc; margin-top: 20px; }
+  #loginPanel { margin-bottom: 20px; }
+  #loginPanel input { padding: 6px; }
+  #loginPanel button { padding: 6px 12px; }
+  #adminPanel input, #adminPanel button { padding: 8px; margin: 5px 0; width: 100%; box-sizing: border-box; }
+  #logoutBtn { background: #ccc; }
+</style>
+</head>
+<body>
+  <h1>Peoplerep Stock Exchange (PSX)</h1>
+  <p>Currency: ₽ (Russian Rubles, English decimals & commas)</p>
+
+  <div id="loginPanel">
+    <label>Admin Password: <input type="password" id="adminPass" /></label>
+    <button id="loginBtn">Login</button>
+    <span id="loginMsg" style="color:red; margin-left:10px;"></span>
+  </div>
+
+  <div id="adminPanel">
+    <h2>Add New Company</h2>
+    <input type="text" id="symbol" placeholder="Symbol (e.g. PRC)" maxlength="5" />
+    <input type="text" id="name" placeholder="Company Name" />
+    <input type="number" id="price" placeholder="Starting Price ₽" min="0.01" step="0.01" />
+    <button id="addCompanyBtn">Add Company</button>
+    <button id="logoutBtn">Logout</button>
+  </div>
+
+  <table id="stockTable">
+    <thead>
+      <tr><th>Symbol</th><th>Company</th><th>Price (₽)</th><th>Change</th><th>Chart</th></tr>
+    </thead>
+    <tbody></tbody>
+  </table>
+
+<script>
+const ADMIN_PASSWORD = 'admin123';
+let companies = JSON.parse(localStorage.getItem('psx_companies') || '[]');
+let priceHistory = JSON.parse(localStorage.getItem('psx_priceHistory') || '{}');
+const charts = {};
+
+function format₽(x) {
+  return '₽ ' + x.toLocaleString('en-US', { minimumFractionDigits:2, maximumFractionDigits:2 });
+}
+
+function saveState() {
+  localStorage.setItem('psx_companies', JSON.stringify(companies));
+  localStorage.setItem('psx_priceHistory', JSON.stringify(priceHistory));
+}
+
+function addRow(symbol, name) {
+  const hist = priceHistory[symbol];
+  const tr = document.createElement('tr');
+  tr.id = 'row-' + symbol;
+  tr.innerHTML = `
+    <td>${symbol}</td>
+    <td>${name}</td>
+    <td class="price"></td>
+    <td class="change"></td>
+    <td><canvas id="chart-${symbol}" width="200" height="60"></canvas></td>
+  `;
+  document.querySelector('#stockTable tbody').appendChild(tr);
+  // init chart
+  const ctx = document.getElementById('chart-' + symbol).getContext('2d');
+  charts[symbol] = new Chart(ctx, {
+    type: 'line',
+    data: { labels: [], datasets: [{ data: hist, borderColor: '#007bff', fill: false, tension: 0.3, pointRadius: 0 }]},
+    options: { responsive: false, plugins: { legend:{ display:false } }, scales: { x:{display:false}, y:{display:false} } }
+  });
+}
+
+function renderTable() {
+  document.querySelector('#stockTable tbody').innerHTML = '';
+  Object.keys(priceHistory).forEach(symbol => {
+    const comp = companies.find(c => c.symbol === symbol);
+    if (comp) addRow(symbol, comp.name);
+  });
+}
+
+function updatePrices() {
+  companies.forEach(c => {
+    const sym = c.symbol;
+    const hist = priceHistory[sym] = priceHistory[sym] || [c.price];
+    const prev = hist[hist.length - 1];
+    const next = parseFloat((prev * (1 + (Math.random()-0.5)*0.04)).toFixed(2));
+    hist.push(next);
+    if (hist.length > 12) hist.shift();
+    const row = document.getElementById('row-' + sym);
+    row.querySelector('.price').textContent = format₽(next);
+    const change = parseFloat((next - hist[hist.length-2]).toFixed(2));
+    const pct = ((change / hist[hist.length-2]) * 100).toFixed(2);
+    const arrow = change>=0 ? '▲' : '▼';
+    const color = change>=0 ? 'green' : 'red';
+    const chCell = row.querySelector('.change');
+    chCell.textContent = `${arrow} ${format₽(Math.abs(change))} (${pct}%)`;
+    chCell.style.color = color;
+    // update chart
+    const chart = charts[sym];
+    chart.data.datasets[0].data = hist;
+    chart.update();
+  });
+  saveState();
+}
+
+document.getElementById('loginBtn').onclick = () => {
+  const pass = document.getElementById('adminPass').value;
+  if (pass === ADMIN_PASSWORD) {
+    document.getElementById('adminPanel').style.display = 'block';
+    document.getElementById('loginPanel').style.display = 'none';
+  } else {
+    document.getElementById('loginMsg').textContent = 'Wrong password';
+  }
+};
+
+document.getElementById('logoutBtn').onclick = () => {
+  document.getElementById('adminPanel').style.display = 'none';
+  document.getElementById('loginPanel').style.display = 'block';
+};
+
+document.getElementById('addCompanyBtn').onclick = () => {
+  const sym = document.getElementById('symbol').value.toUpperCase();
+  const name = document.getElementById('name').value;
+  const price = parseFloat(document.getElementById('price').value);
+  if (sym && name && !companies.find(c=>c.symbol===sym)) {
+    companies.push({symbol: sym, name: name, price: price});
+    priceHistory[sym] = [price];
+    saveState();
+    addRow(sym, name);
+    document.getElementById('symbol').value = '';
+    document.getElementById('name').value = '';
+    document.getElementById('price').value = '';
+  }
+};
+
+window.onload = () => {
+  renderTable();
+  Object.keys(priceHistory).forEach(sym => {
+    if (!charts[sym]) addRow(sym, companies.find(c=>c.symbol===sym).name);
+  });
+  updatePrices(); // initial
+  setInterval(updatePrices, 3600000); // hourly, use 5000 for testing
+};
+</script>
+</body>
+</html>
